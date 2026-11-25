@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agente de Órdenes de Compra · Periferia</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="barra">
+      <div>
+        <h1>Órdenes de compra · SAP simulado</h1>
+        <p class="sub">Agente que valida solicitudes (RC1–RC10) y prepara la OC. Nunca crea con excepciones sin tu confirmación.</p>
+      </div>
+      <div class="acciones">
+        <span id="estado" class="chip" title="Proveedor y modelo">conectando…</span>
+        <button id="nueva" class="sec" type="button">Nueva sesión</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="chat" aria-label="Conversación">
+        <div id="rapidos" class="rapidos" aria-label="Casos de ejemplo"></div>
+        <div id="mensajes" class="mensajes" role="log" aria-live="polite"></div>
+
+        <div id="confirmacion" class="confirmacion" hidden>
+          <strong>⚠ El agente espera tu confirmación</strong>
+          <span>Revisa las excepciones y responde. Sin tu confirmación explícita no se crea la OC.</span>
+          <div class="fila">
+            <button id="confirmo" type="button">Confirmo, crea la OC</button>
+            <button id="espera" class="sec" type="button">No la crees todavía</button>
+          </div>
+        </div>
+
+        <div id="pensando" class="pensando" hidden><span class="punto"></span><span class="punto"></span><span class="punto"></span> pensando…</div>
+
+        <form id="form" class="form" autocomplete="off">
+          <textarea id="texto" rows="2" maxlength="2000" placeholder="Ej.: Procesa la solicitud sol-004. Muéstrame la OC como quedaría y no la crees hasta que yo lo confirme."></textarea>
+          <button id="enviar" type="submit">Enviar</button>
+        </form>
+      </section>
+
+      <aside class="lateral" aria-label="Resultados">
+        <h2>Resultados</h2>
+        <p class="sub">Salidas generadas por las herramientas (solo lectura).</p>
+        <div class="fila">
+          <button id="verControl" class="sec" type="button">control.csv</button>
+          <button id="verSap" class="sec" type="button">Órdenes en SAP</button>
+        </div>
+        <pre id="salida" class="salida">Pulsa un botón para ver el log de control o las órdenes creadas.</pre>
+      </aside>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
