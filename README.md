@@ -3,7 +3,7 @@
 Agente conversacional en TypeScript que lee un paquete de compra (correo, solicitud, cotización, aprobación y factura si existe), lo valida contra los maestros y los controles **RC1–RC10**, construye la orden de compra tal como quedaría en SAP, genera la evidencia de aprobación y crea la OC en un **SAP simulado**. Lo que no cumple control no se fuerza: se bloquea o se devuelve a la analista para que confirme.
 
 - Documentación técnica y decisiones: [`SOLUCION.md`](./SOLUCION.md)
-- **Link de prueba:** `PENDIENTE: pegar aquí la URL pública una vez desplegado` (ver [Despliegue](#despliegue))
+- **Link de prueba:** https://reto-03-ordenes-compra-qaj8.onrender.com/ (desplegado en Render, plan gratuito: si estuvo inactivo, la primera carga puede tardar hasta ~1 min; las sesiones y la evidencia se pierden al reiniciar; ver [Despliegue](#despliegue))
 - **Acceso:** la aplicación es pública, sin clave de acceso.
 
 ## Probarlo en 2 minutos (sin clave de ningún modelo)

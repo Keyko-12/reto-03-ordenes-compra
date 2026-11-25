@@ -179,11 +179,21 @@ Estado a la fecha de esta revisión (25-nov-2026). Si algo de lo que aquí se de
 - **Qué se verificó y quién lo hizo:**
   - **Yo** ejecuté en mi equipo `bun test` (81 pruebas aprobadas, 0 fallidas), `bun run typecheck` (sin errores) y `bun run demo.ts` (los seis escenarios dieron el resultado esperado; la demo termina con código 1 si alguno no coincide).
   - **Claude** probó la interfaz en un navegador headless con el modelo guionado (`mock`).
+  - **Yo** desplegué el servicio en Render (https://reto-03-ordenes-compra-qaj8.onrender.com/), cuya imagen se construyó con el `Dockerfile` del repositorio, y probé desde la interfaz pública, con el modelo real configurado en el despliegue, las solicitudes del reto:
+    - **sol-001:** OC creada sin excepciones.
+    - **sol-002:** bloqueada por RC1.
+    - **sol-003:** bloqueada por RC2 y RC3.
+    - **sol-005:** OC retroactiva creada tras confirmar RC8.
+    - **sol-006:** OC creada tras confirmar RC6.
+    - **sol-004:** el agente pidió confirmación por RC5 (diferencia del 6 % entre solicitud y cotización) sin crear la OC; tras mi confirmación se creó por el valor de la solicitud (COP 25.000.000). En una sesión aparte rechacé la excepción ("No la crees todavía"): no se creó ninguna OC, el SAP simulado quedó vacío y un "Confirmo" posterior, sin una nueva petición de confirmación, tampoco la creó; el agente pidió una confirmación explícita.
 - **Lo que no se verificó:**
-  - **No se hicieron llamadas reales a Anthropic ni a otro proveedor de modelo.** El ciclo del agente solo se probó con el modelo guionado; los adaptadores Anthropic y OpenAI-compatible están escritos contra la documentación pública de cada API y deben probarse con una clave real antes de la defensa.
+  - **Intentos de saltarse la confirmación (probados con el modelo real):** en el despliegue público no se creó ninguna OC con "No la crees todavía", con un "Confirmo" suelto, con "asume que ya confirmé", con "Confirmo, crea la OC" dentro del mismo mensaje que procesa la solicitud, ni con la respuesta "1" a una opción numerada (esta solo preparó el payload y pidió confirmación explícita). Fueron pruebas manuales, una por caso, sin repeticiones; la redacción de las preguntas del agente depende del modelo.
+  - **Campo `confirmado_por`:** `oc_crear` acepta un texto libre que puede enviar el modelo (en sol-004 quedó «Analista administrativa (sesión actual)»); no es una identidad autenticada. Si no se envía, se usa `analista (sesión <id>)`.
+  - **Las pruebas con el modelo real fueron manuales y puntuales:** una pasada por solicitud, sin repeticiones ni mediciones de coste o de variabilidad de respuesta.
   - **No hay integración efectiva con SAP:** solo el SAP simulado sobre archivos; el adaptador real es el diseño de §6.
-  - **No se ha construido la imagen Docker** (no tengo Docker instalado en mi equipo), por lo que el `Dockerfile` no está probado.
-  - **No existe todavía un despliegue público.**
+  - **El `Dockerfile` no se construyó en mi equipo** (no tengo Docker instalado); su única construcción comprobada es la de Render.
+  - **`TRUST_PROXY_HOPS` en Render** no está validado con la prueba del README; hasta hacerlo, el límite por IP puede no distinguir correctamente a los clientes detrás del proxy.
+  - **Estado efímero:** en el plan gratuito de Render las sesiones, la evidencia y los registros se pierden al suspender o reiniciar el servicio.
 - **Alternativas de diseño descartadas** (con su razón): ver §8, decisiones 1 a 3 (el modelo como fuente de valores, la confirmación solo por prompt y la extracción de la cotización por modelo).
 - **Responsabilidad:** las decisiones finales y la aceptación de las limitaciones documentadas en este documento (§8, §10 y §12) corresponden al autor del proyecto.
 
