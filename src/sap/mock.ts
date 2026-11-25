@@ -37,10 +37,10 @@ export class SapMock implements SapAdapter {
     return p ? { codigo_sap: p.codigo_sap, activo: p.activo } : null
   }
 
-  async buscarOrdenPorReferencia(solicitud_id: string): Promise<{ numero_oc: string } | null> {
+  async buscarOrdenPorReferencia(solicitud_id: string): Promise<{ numero_oc: string; fecha?: string } | null> {
     const registros = await this.leerRegistros()
     const r = registros.find((x) => x.orden.referencia.solicitud_id === solicitud_id)
-    return r ? { numero_oc: r.numero_oc } : null
+    return r ? { numero_oc: r.numero_oc, fecha: r.fecha } : null
   }
 
   crearOrden(orden: OrdenCompra): Promise<{ numero_oc: string; fecha: string }> {
