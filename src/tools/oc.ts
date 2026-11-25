@@ -128,7 +128,7 @@ export const crear = definir({
 
       // 2) Bloqueos: no se crea nada, se devuelve la razón y la acción sugerida.
       if (!validacion.apta) {
-        await registrarControl(ctx, { ...base, resultado: "bloqueada", numero_oc: "" }, true)
+        await registrarControl(ctx, { ...base, resultado: "bloqueada", numero_oc: "" })
         return falla(`No se crea la OC de ${id}: ${validacion.bloqueos.map((b) => `${b.codigo} ${b.detalle}`).join(" | ")}`, {
           bloqueada: true,
           bloqueos: validacion.bloqueos,
@@ -140,12 +140,14 @@ export const crear = definir({
       if (pendientes.length > 0) {
         const detalleConf = pendientes.map((c) => `${c.codigo}: ${c.detalle}`).join(" | ")
         const sinConfirmar = (motivo: string) =>
-          registrarControl(ctx, { ...base, resultado: "pendiente_confirmacion", numero_oc: "" }, true).then(() =>
+          registrarControl(ctx, { ...base, resultado: "pendiente_confirmacion", numero_oc: "" }).then(() =>
             falla(`requiere confirmación explícita: ${motivo}`, { requiere_confirmacion: true, confirmaciones: pendientes }),
           )
         if (!args.confirmado) return sinConfirmar(detalleConf)
         if (ctx.confirmar && !ctx.confirmar(args.caso)) {
-          return sinConfirmar(`la confirmación debe venir del usuario en el mensaje siguiente a la petición. Pendiente: ${detalleConf}`)
+          return sinConfirmar(
+            `la confirmación debe ser un mensaje afirmativo explícito del usuario (p. ej. «confirmo»), enviado justo después de la petición; un «no» o una respuesta ambigua no confirma. Pendiente: ${detalleConf}`,
+          )
         }
       }
 

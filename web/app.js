@@ -138,9 +138,9 @@ async function mostrar(ruta, formato) {
     el.salida.textContent = "No se pudo leer la salida."
   }
 }
-$("verControl").addEventListener("click", () => mostrar("/api/control", (r) => r.csv))
+$("verControl").addEventListener("click", () => mostrar(`/api/control?sessionId=${encodeURIComponent(sessionId)}`, (r) => r.csv))
 $("verSap").addEventListener("click", () =>
-  mostrar("/api/sap", (r) => r.ordenes.map((o) => `${o.numero_oc} · ${o.fecha} · ${o.orden.referencia.solicitud_id} · ${o.orden.proveedor.nombre} · excepciones: ${o.orden.excepciones.map((e) => e.codigo).join(",") || "—"}`).join("\n")),
+  mostrar(`/api/sap?sessionId=${encodeURIComponent(sessionId)}`, (r) => r.ordenes.map((o) => `${o.numero_oc} · ${o.fecha} · ${o.orden.referencia.solicitud_id} · ${o.orden.proveedor.nombre} · excepciones: ${o.orden.excepciones.map((e) => e.codigo).join(",") || "—"}`).join("\n")),
 )
 
 /* ---------- Arranque ---------- */

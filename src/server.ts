@@ -1,9 +1,11 @@
+import { rmSync } from "node:fs"
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
-import { readFile } from "node:fs/promises"
+import { readFile, rm } from "node:fs/promises"
 import { extname, join, normalize, sep } from "node:path"
 import { cargarSystemPrompt, ejecutarTurno, nuevaSesion, type ConfigAgente, type Sesion } from "./agent.ts"
 import { crearLlm, type LlmAdapter } from "./llm/index.ts"
 import { listarCasos } from "./tools/paquete.ts"
+import { dirSalidaSesion } from "./tools/util.ts"
 
 export type OpcionesServidor = {
   directory: string
@@ -12,6 +14,11 @@ export type OpcionesServidor = {
   maxTokensSesion: number
   maxTokensDia: number
   limitePorMinuto: number
+  /**
+   * Cuántos proxies de confianza hay delante del servidor (0 = ninguno: se usa la IP del socket y
+   * se ignora X-Forwarded-For, que el cliente puede falsificar). Por defecto 0.
+   */
+  trustProxyHops?: number
 }
 
 const TIPOS: Record<string, string> = {
@@ -34,7 +41,30 @@ export function opcionesDesdeEnv(directory: string, env: Record<string, string |
     maxTokensSesion: Number(env.MAX_TOKENS_SESION ?? 150_000),
     maxTokensDia: Number(env.MAX_TOKENS_DIA ?? 1_500_000),
     limitePorMinuto: Number(env.RATE_LIMIT_POR_MINUTO ?? 20),
+    trustProxyHops: saltosDeProxy(env.TRUST_PROXY_HOPS),
   }
+}
+
+function saltosDeProxy(valor: string | undefined): number {
+  const n = Number(valor ?? 0)
+  return Number.isInteger(n) && n >= 0 ? n : 0
+}
+
+/**
+ * IP del cliente para el límite de peticiones.
+ * Con `saltos = N` se toma la N-ésima entrada de X-Forwarded-For contando desde el FINAL: es la que añade
+ * el último proxy de confianza. Lo que el cliente escriba antes en el encabezado no cuenta.
+ * Si el encabezado trae menos de N entradas se usa la IP del socket (nunca un valor falsificable).
+ */
+export function ipCliente(ipSocket: string | undefined, forwardedFor: string | string[] | undefined, saltos: number): string {
+  const directa = ipSocket ?? "?"
+  if (saltos <= 0) return directa
+  const cadena = (Array.isArray(forwardedFor) ? forwardedFor.join(",") : (forwardedFor ?? ""))
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const candidata = cadena[cadena.length - saltos]
+  return candidata ? candidata.slice(0, 64) : directa
 }
 
 function json(res: ServerResponse, estado: number, cuerpo: unknown): void {
@@ -60,6 +90,8 @@ async function leerCuerpo(req: IncomingMessage, limite = 32 * 1024): Promise<unk
 export function crearServidor(opts: OpcionesServidor): Server {
   const sesiones = new Map<string, Sesion>()
   const visitas = new Map<string, number[]>()
+  // Las sesiones viven en memoria: tras un reinicio, las carpetas de sesiones anteriores quedan huérfanas.
+  rmSync(join(opts.directory, "out", "sesiones"), { recursive: true, force: true })
   const dia = { fecha: "", tokens: 0 }
   let systemPrompt: Promise<string> | null = null
 
@@ -109,7 +141,11 @@ export function crearServidor(opts: OpcionesServidor): Server {
     systemPrompt ??= cargarSystemPrompt(opts.directory)
     let sesion = sesiones.get(sessionId)
     if (!sesion) {
-      if (sesiones.size >= MAX_SESIONES) sesiones.delete(sesiones.keys().next().value as string)
+      if (sesiones.size >= MAX_SESIONES) {
+        const antigua = sesiones.keys().next().value as string
+        sesiones.delete(antigua)
+        void rm(dirSalidaSesion(opts.directory, antigua), { recursive: true, force: true })
+      }
       sesion = nuevaSesion(sessionId, await systemPrompt)
       sesiones.set(sessionId, sesion)
     }
@@ -142,9 +178,9 @@ export function crearServidor(opts: OpcionesServidor): Server {
     }
   }
 
-  async function leerSalida(archivo: string): Promise<string> {
+  async function leerSalida(sessionId: string, archivo: string): Promise<string> {
     try {
-      return await readFile(join(opts.directory, "out", archivo), "utf8")
+      return await readFile(join(dirSalidaSesion(opts.directory, sessionId), archivo), "utf8")
     } catch {
       return ""
     }
@@ -153,7 +189,7 @@ export function crearServidor(opts: OpcionesServidor): Server {
   return createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost")
-      const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "?").split(",")[0]!.trim()
+      const ip = ipCliente(req.socket.remoteAddress, req.headers["x-forwarded-for"], opts.trustProxyHops ?? 0)
 
       if (req.method === "GET" && url.pathname === "/api/health") {
         return json(res, 200, { ok: true, provider: opts.llm.proveedor, model: opts.llm.modelo, configured: opts.llm.configurado })
@@ -169,10 +205,12 @@ export function crearServidor(opts: OpcionesServidor): Server {
         if (!s) return json(res, 404, { error: "Sesión no encontrada." })
         return json(res, 200, { id: s.id, creada: s.creada, turno: s.turno, tokens: s.tokens, mensajes: s.mensajes.filter((x) => x.rol !== "sistema") })
       }
-      // Salidas de solo lectura para revisar el resultado sin acceso al servidor.
-      if (req.method === "GET" && url.pathname === "/api/control") return json(res, 200, { csv: await leerSalida("control.csv") })
-      if (req.method === "GET" && url.pathname === "/api/sap") {
-        const lineas = (await leerSalida(join("sap", "ordenes.jsonl"))).split("\n").filter(Boolean)
+      // Salidas de solo lectura de UNA sesión (cada sesión tiene su propio SAP simulado y su control.csv).
+      if (req.method === "GET" && (url.pathname === "/api/control" || url.pathname === "/api/sap")) {
+        const sessionId = url.searchParams.get("sessionId") ?? ""
+        if (!ID_SESION.test(sessionId)) return json(res, 400, { error: "Indica ?sessionId= con el id de tu sesión." })
+        if (url.pathname === "/api/control") return json(res, 200, { csv: await leerSalida(sessionId, "control.csv") })
+        const lineas = (await leerSalida(sessionId, join("sap", "ordenes.jsonl"))).split("\n").filter(Boolean)
         return json(res, 200, { ordenes: lineas.map((l) => JSON.parse(l)) })
       }
 

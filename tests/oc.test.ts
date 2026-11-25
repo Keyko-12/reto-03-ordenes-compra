@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ejecutarHerramienta } from "../src/tools/registro.ts"
 import { esAprobado, parsearCotizacion } from "../src/tools/paquete.ts"
-import { normalizarNit, normalizarNombre } from "../src/tools/util.ts"
+import { dirSalidaSesion, normalizarNit, normalizarNombre } from "../src/tools/util.ts"
 
 const raiz = join(import.meta.dir, "..")
 const dirs: string[] = []
@@ -94,6 +94,30 @@ describe("creación de la OC", () => {
     expect(csv).toContain("SOL-2026-005,creada,4500000001,true,,RC8")
   })
 
+  test("control.csv: cada llamada a oc_crear deja su fila, también si se repite una solicitud bloqueada", async () => {
+    const ctx = proyecto()
+    for (let i = 0; i < 3; i++) await llamar(ctx, "oc_crear", { caso: "sol-002" })
+    const filas = readFileSync(join(ctx.directory, "out/control.csv"), "utf8").split("\n").filter((l) => l.startsWith("SOL-2026-002,"))
+    expect(filas).toHaveLength(3)
+    expect(filas.every((f) => f.startsWith("SOL-2026-002,bloqueada,,false,RC1"))).toBe(true)
+  })
+
+  test("control.csv: pendientes de confirmación repetidos también registran cada intento", async () => {
+    const ctx = proyecto()
+    await llamar(ctx, "oc_crear", { caso: "sol-004" })
+    await llamar(ctx, "oc_crear", { caso: "sol-004" })
+    const filas = readFileSync(join(ctx.directory, "out/control.csv"), "utf8").split("\n").filter((l) => l.startsWith("SOL-2026-004,pendiente_confirmacion"))
+    expect(filas).toHaveLength(2)
+  })
+
+  test("control.csv: oc_validar repetido sí omite la fila idéntica (es una consulta)", async () => {
+    const ctx = proyecto()
+    await llamar(ctx, "oc_validar", { caso: "sol-002" })
+    await llamar(ctx, "oc_validar", { caso: "sol-002" })
+    const filas = readFileSync(join(ctx.directory, "out/control.csv"), "utf8").split("\n").filter((l) => l.startsWith("SOL-2026-002,"))
+    expect(filas).toHaveLength(1)
+  })
+
   test("un payload alterado por el modelo se rechaza", async () => {
     const ctx = proyecto()
     const p = await llamar(ctx, "oc_construir_payload", { caso: "sol-001" })
@@ -172,5 +196,22 @@ describe("utilidades", () => {
   test("parsearCotizacion", () => {
     const c = parsearCotizacion("COTIZACIÓN X-1\nFecha: 2026-01-10\nProveedor: A\nNIT: 900.555.111-2\n1. Hora de arquitecto | Cantidad: 1\nIVA 19%: COP 1\nTOTAL (IVA incluido): COP 1.234.500\nValidez de la oferta: 20 días")
     expect(c).toMatchObject({ total: 1234500, nit: "900555111", referencia: "X-1", validez_hasta: "2026-01-30", iva_tasa: 0.19 })
+  })
+})
+
+describe("salida por sesión", () => {
+  test("ctx.outDir redirige todas las escrituras y out/ queda intacto", async () => {
+    const base = proyecto()
+    const ctx = { ...base, outDir: dirSalidaSesion(base.directory, "sesion-x") }
+    await llamar(ctx, "oc_crear", { caso: "sol-001" })
+    expect(readFileSync(join(ctx.outDir, "control.csv"), "utf8")).toContain("SOL-2026-001,creada,4500000001")
+    expect(() => readFileSync(join(base.directory, "out/control.csv"), "utf8")).toThrow()
+  })
+
+  test("dirSalidaSesion rechaza ids que escapan de out/sesiones/", () => {
+    for (const malo of ["", "..", "../x", "a/b", "a\\b", "x".repeat(65)]) {
+      expect(() => dirSalidaSesion("/tmp/p", malo)).toThrow("Identificador de sesión inválido")
+    }
+    expect(dirSalidaSesion("/tmp/p", "abc-123_X")).toContain("sesiones")
   })
 })

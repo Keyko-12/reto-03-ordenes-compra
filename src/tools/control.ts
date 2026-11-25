@@ -21,7 +21,9 @@ const clave = (f: FilaControl): string =>
 
 /**
  * Agrega una fila a out/control.csv (consumido por Contabilidad / Auditoría).
- * Con `sinRepetir`, omite la fila si la última de esa solicitud es idéntica.
+ * Cada intento de `oc_crear` agrega siempre su fila, aunque repita al anterior (HU-5).
+ * Solo `oc_validar`, que es una consulta sin efectos, usa `sinRepetir` para no inflar el log
+ * cuando se valida dos veces seguidas: omite la fila si la última de esa solicitud es idéntica.
  */
 export async function registrarControl(ctx: Ctx, fila: FilaControl, sinRepetir = false): Promise<void> {
   const archivo = join(rutas(ctx).out, "control.csv")

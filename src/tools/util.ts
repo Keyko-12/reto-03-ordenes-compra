@@ -8,6 +8,11 @@ export type Ctx = {
   directory: string
   sessionId: string
   /**
+   * Carpeta de salida (control.csv, log.jsonl, sap/, <caso>/). Por defecto `<directory>/out`.
+   * El servidor la fija por sesión (`out/sesiones/<id>`) para que dos usuarios no compartan órdenes ni registros.
+   */
+  outDir?: string
+  /**
    * Guardia de confirmación humana (la pone el ciclo del agente).
    * Si no existe (demo.ts, pruebas), se confía en el argumento `confirmado`.
    */
@@ -44,8 +49,16 @@ export async function protegido(fn: () => Promise<Resultado<unknown>>): Promise<
 export function rutas(ctx: Ctx) {
   return {
     fixtures: join(ctx.directory, "fixtures", "reto-03"),
-    out: join(ctx.directory, "out"),
+    out: ctx.outDir ?? join(ctx.directory, "out"),
   }
+}
+
+const ID_SESION = /^[A-Za-z0-9_-]{1,64}$/
+
+/** Carpeta de salida aislada de una sesión. Valida el id para que no pueda escapar de `out/sesiones/`. */
+export function dirSalidaSesion(directory: string, sessionId: string): string {
+  if (!ID_SESION.test(sessionId)) throw new ErrorNegocio("Identificador de sesión inválido.")
+  return join(directory, "out", "sesiones", sessionId)
 }
 
 const CASO_VALIDO = /^[A-Za-z0-9_-]{1,64}$/

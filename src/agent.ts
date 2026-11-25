@@ -1,7 +1,9 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { clasificarConfirmacion } from "./confirmacion.ts"
 import { mensajeDeError, type LlmAdapter, type Mensaje } from "./llm/adapter.ts"
 import { definiciones, ejecutarHerramienta, resumir } from "./tools/registro.ts"
+import { dirSalidaSesion } from "./tools/util.ts"
 
 /** Estado de una conversación. En memoria: suficiente para el reto (sin base de datos). */
 export type Sesion = {
@@ -73,7 +75,10 @@ function parsear(texto: string): RespuestaHerramienta {
  *
  * - CA1: se detiene en `maxIteraciones` y responde con lo que tiene.
  * - CA3: la confirmación humana se hace cumplir aquí, no solo en el prompt. `oc_crear` con
- *   `confirmado: true` solo procede si la confirmación se pidió en el turno INMEDIATAMENTE anterior.
+ *   `confirmado: true` solo procede si (a) la confirmación se pidió en el turno INMEDIATAMENTE anterior
+ *   y (b) el mensaje del usuario en este turno es una confirmación afirmativa explícita
+ *   (un «no» o una respuesta ambigua nunca confirma, diga lo que diga el modelo).
+ * - Salidas aisladas: cada sesión escribe en `out/sesiones/<id>/` (SAP simulado, control.csv, log.jsonl).
  * - CA5: un fallo del proveedor LLM se convierte en un mensaje claro; la sesión sigue viva.
  */
 export async function ejecutarTurno(sesion: Sesion, texto: string, llm: LlmAdapter, cfg: ConfigAgente): Promise<RespuestaTurno> {
@@ -88,6 +93,8 @@ export async function ejecutarTurno(sesion: Sesion, texto: string, llm: LlmAdapt
     return { reply: "Esta sesión alcanzó su tope de tokens. Abre una sesión nueva para continuar.", toolCalls, needsConfirmation: false, tokensSesion: sesion.tokens }
   }
 
+  const outDir = dirSalidaSesion(cfg.directory, sesion.id)
+  const veredicto = clasificarConfirmacion(texto)
   sesion.turno += 1
   sesion.mensajes.push({ rol: "usuario", texto })
   const pendientesAlCierre = new Set<string>()
@@ -114,7 +121,8 @@ export async function ejecutarTurno(sesion: Sesion, texto: string, llm: LlmAdapt
       const ctx = {
         directory: cfg.directory,
         sessionId: sesion.id,
-        confirmar: (caso: string) => sesion.pendientes[caso] === sesion.turno - 1,
+        outDir,
+        confirmar: (caso: string) => veredicto === "afirmativa" && sesion.pendientes[caso] === sesion.turno - 1,
       }
       const crudo = await ejecutarHerramienta(llamada.nombre, llamada.args, ctx)
       sesion.mensajes.push({ rol: "herramienta", id: llamada.id, nombre: llamada.nombre, resultado: crudo })
