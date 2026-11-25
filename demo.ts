@@ -11,7 +11,29 @@ import { listarCasos } from "./src/tools/paquete.ts"
 const directory = import.meta.dir
 const ctx = { directory, sessionId: "demo" }
 
-type Json = { ok: boolean; error?: string; data?: Record<string, any>; [k: string]: any }
+type Hallazgo = { codigo: string; detalle: string; accion_sugerida?: string }
+type Posicion = { cantidad: number; unidad: string; precio_unitario: number; indicador_iva: string }
+type Orden = { proveedor: { codigo_sap: string }; condiciones_pago: string; posiciones: Posicion[] }
+type Json = {
+  ok: boolean
+  error?: string
+  bloqueada?: boolean
+  requiere_confirmacion?: boolean
+  data?: {
+    solicitud: { solicitud_id: string; proveedor_nombre: string; moneda: string; valor_total: number; centro_costo: string; subarea: string }
+    apta: boolean
+    bloqueos: Hallazgo[]
+    confirmaciones: Hallazgo[]
+    derivados: Record<string, { valor: string; detalle?: string }>
+    retroactiva: boolean
+    orden: Orden
+    ruta: string
+    sha256: string
+    numero_oc: string
+    fecha: string
+    idempotente: boolean
+  }
+}
 
 async function llamar(nombre: string, args: Record<string, unknown>): Promise<Json> {
   return JSON.parse(await ejecutarHerramienta(nombre, args, ctx)) as Json
@@ -82,7 +104,7 @@ for (const caso of casos) {
     const p = await llamar("oc_construir_payload", { caso, paquete: paquete.data, derivados: v.derivados })
     verificar(p.ok, `${caso}: el payload debe construirse`)
     const orden = p.data!.orden
-    const pos = orden.posiciones[0]
+    const pos = orden.posiciones[0] ?? { cantidad: 0, unidad: "?", precio_unitario: 0, indicador_iva: "?" }
     linea(`  oc_construir_payload → proveedor ${orden.proveedor.codigo_sap} · ${pos.cantidad} ${pos.unidad} × ${pos.precio_unitario} · IVA ${pos.indicador_iva} · pago ${orden.condiciones_pago}`)
     const e = await llamar("oc_generar_evidencia", { caso })
     linea(`  oc_generar_evidencia → ${e.data?.ruta} · sha256 ${String(e.data?.sha256).slice(0, 16)}…`)

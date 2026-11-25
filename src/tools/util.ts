@@ -32,7 +32,7 @@ export function serializar(r: Resultado<unknown>): string {
 }
 
 /** Ejecuta `fn` garantizando que nunca lance: convierte cualquier excepción en { ok:false }. */
-export async function protegido<T>(fn: () => Promise<Resultado<T>>): Promise<string> {
+export async function protegido(fn: () => Promise<Resultado<unknown>>): Promise<string> {
   try {
     return serializar(await fn())
   } catch (e) {

@@ -53,9 +53,16 @@ export function nuevaSesion(id: string, systemPrompt: string): Sesion {
 
 const MAX_RESULTADO_UI = 6000
 
-function parsear(texto: string): Record<string, any> {
+/** Forma mínima de la respuesta de una herramienta que el ciclo necesita para decidir. */
+type RespuestaHerramienta = {
+  ok?: boolean
+  requiere_confirmacion?: boolean
+  data?: { apta?: boolean; confirmaciones?: unknown[] }
+}
+
+function parsear(texto: string): RespuestaHerramienta {
   try {
-    return JSON.parse(texto) as Record<string, any>
+    return JSON.parse(texto) as RespuestaHerramienta
   } catch {
     return {}
   }
@@ -124,7 +131,7 @@ export async function ejecutarTurno(sesion: Sesion, texto: string, llm: LlmAdapt
 
       const caso = typeof llamada.args.caso === "string" ? llamada.args.caso : null
       if (caso) {
-        const data = (json.data ?? {}) as Record<string, any>
+        const data = json.data ?? {}
         const pideConfirmar =
           (llamada.nombre === "oc_validar" && json.ok && data.apta === true && Array.isArray(data.confirmaciones) && data.confirmaciones.length > 0) ||
           (llamada.nombre === "oc_crear" && json.requiere_confirmacion === true)

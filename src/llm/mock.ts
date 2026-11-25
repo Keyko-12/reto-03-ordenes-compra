@@ -1,6 +1,15 @@
 import type { DefinicionHerramienta, LlamadaHerramienta, LlmAdapter, Mensaje, RespuestaLlm } from "./adapter.ts"
 
-type Json = { ok?: boolean; error?: string; data?: Record<string, any>; [k: string]: any }
+type Hallazgo = { codigo: string; detalle: string; accion_sugerida?: string }
+type Orden = {
+  proveedor?: { nombre?: string; codigo_sap?: string }
+  moneda?: string
+  condiciones_pago?: string
+  aprobador?: { email?: string }
+  posiciones?: Array<{ cantidad?: number; unidad?: string; precio_unitario?: number; centro_costo?: string; subarea?: string; indicador_iva?: string }>
+}
+type Datos = { apta?: boolean; bloqueos?: Hallazgo[]; confirmaciones?: Hallazgo[]; orden?: Orden; numero_oc?: string; idempotente?: boolean; evidencia?: string }
+type Json = { ok?: boolean; error?: string; data?: Datos }
 
 const parsear = (t: string): Json => {
   try {
@@ -59,7 +68,7 @@ export class MockLlm implements LlmAdapter {
     const v = validar.data ?? {}
 
     if (!v.apta) {
-      const lineas = (v.bloqueos as Array<{ codigo: string; detalle: string; accion_sugerida?: string }>).map(
+      const lineas = (v.bloqueos ?? []).map(
         (b) => `- **${b.codigo}**: ${b.detalle}\n  Acción sugerida: ${b.accion_sugerida ?? "—"}`,
       )
       return responder(`⛔ **${caso} no puede crearse.** Bloqueos:\n${lineas.join("\n")}\n\nNo se creó ninguna OC.`)
@@ -80,7 +89,7 @@ export class MockLlm implements LlmAdapter {
       `| Aprobador | ${orden.aprobador?.email} |`,
     ].join("\n")
 
-    const confirmaciones = (v.confirmaciones ?? []) as Array<{ codigo: string; detalle: string }>
+    const confirmaciones = v.confirmaciones ?? []
     if (confirmaciones.length > 0) {
       const lista = confirmaciones.map((c) => `- **${c.codigo}**: ${c.detalle}`).join("\n")
       return responder(`Así quedaría la OC de ${caso}:\n\n${tabla}\n\nRequiere tu confirmación:\n${lista}\n\n¿Confirmas que cree la OC con estas excepciones?`)
@@ -92,7 +101,7 @@ export class MockLlm implements LlmAdapter {
     return responder(creada.ok ? `${this.textoCreada(caso, creada.data ?? {})}\n\n${tabla}` : `No se creó la OC: ${creada.error}`)
   }
 
-  private textoCreada(caso: string, d: Record<string, any>): string {
+  private textoCreada(caso: string, d: Datos): string {
     return `✅ OC **${d.numero_oc}** ${d.idempotente ? "(ya existía)" : "creada"} para ${caso}. Evidencia: ${d.evidencia ?? "out/" + caso + "/aprobacion.txt"}.`
   }
 
