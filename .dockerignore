@@ -5,3 +5,7 @@ out
 .env.*
 !.env.example
 tests
+*.bundle
+.vscode
+.idea
+*.log

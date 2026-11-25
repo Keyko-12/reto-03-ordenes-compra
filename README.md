@@ -27,7 +27,7 @@ Resultado esperado:
 
 ## Levantar la aplicación en local
 
-Requisitos: [Bun](https://bun.sh) 1.1+ (o Node 20+ con `tsx`).
+Requisito: [Bun](https://bun.sh) (probado con 1.4.4 y 1.4.5). **No hay compatibilidad con Node**: el servidor y las pruebas usan APIs propias de Bun (`import.meta.dir`, `import.meta.main`, `bun test`).
 
 ```bash
 bun install
@@ -55,6 +55,7 @@ LLM_PROVIDER=mock bun run dev
 | `MAX_TOKENS_SESION` | `150000` | Tope de tokens por sesión |
 | `MAX_TOKENS_DIA` | `1500000` | Tope diario global del servidor (protege tu clave) |
 | `RATE_LIMIT_POR_MINUTO` | `20` | Peticiones por minuto y por IP a `/api/chat` |
+| `TRUST_PROXY_HOPS` | `0` | Cuántos proxies de confianza hay delante del servidor. `0` ignora `X-Forwarded-For` y usa la IP del socket (correcto en local). **Detrás de una plataforma, ver [Despliegue](#despliegue)** |
 | `LLM_TIMEOUT_MS` | `60000` | Timeout de cada llamada al modelo |
 
 La clave solo se lee en el backend: nunca llega al front, a los logs ni a las respuestas de la API.
@@ -62,7 +63,7 @@ La clave solo se lee en el backend: nunca llega al front, a los logs ni a las re
 ## Pruebas y verificación de tipos
 
 ```bash
-bun test            # 35 pruebas: controles, herramientas, ciclo del agente y API
+bun test            # 81 pruebas: controles, herramientas, ciclo del agente, confirmación humana, aislamiento por sesión y API
 bun run typecheck   # tsc --noEmit (TypeScript estricto, sin any)
 ```
 
@@ -74,8 +75,10 @@ bun run typecheck   # tsc --noEmit (TypeScript estricto, sin any)
 | `GET` | `/api/sessions/:id` | Historial completo de la sesión (sin el system prompt) |
 | `GET` | `/api/health` | `{ ok, provider, model, configured }` — sin claves |
 | `GET` | `/api/casos` | Casos disponibles en los fixtures |
-| `GET` | `/api/control` | Contenido de `out/control.csv` (solo lectura) |
-| `GET` | `/api/sap` | Órdenes creadas en el SAP simulado (solo lectura) |
+| `GET` | `/api/control?sessionId=…` | `control.csv` de esa sesión (solo lectura). `sessionId` es obligatorio |
+| `GET` | `/api/sap?sessionId=…` | Órdenes creadas en el SAP simulado de esa sesión (solo lectura). `sessionId` es obligatorio |
+
+**Cada sesión del chat tiene su propio SAP simulado y sus propios registros** (`out/sesiones/<sessionId>/`): dos visitantes no comparten órdenes, y cada uno empieza en la OC `4500000001`. El botón «Nueva sesión» del front da un SAP limpio. Las sesiones viven en memoria: al reiniciar el servidor se borran, y también sus carpetas.
 
 `toolCalls[]` trae, por cada herramienta: `nombre`, `args`, `ok`, `resumen` y `resultado`. `needsConfirmation` es `true` cuando el agente cerró el turno pidiendo confirmación humana; el front lo resalta.
 
@@ -109,9 +112,26 @@ El repositorio incluye un `Dockerfile` (imagen `oven/bun`). Con cualquier plataf
 
 > `out/` vive en el disco del contenedor: se pierde al reiniciar. Es intencional (el reto no pide base de datos).
 
-## Salidas generadas (`out/`)
+### `TRUST_PROXY_HOPS` (límite de peticiones por IP)
 
-- `control.csv` — una fila por intento (`solicitud_id, resultado, numero_oc, retroactiva, bloqueos, confirmaciones, ts`) para Contabilidad / Auditoría.
+El límite por IP se basa en la dirección del cliente. Detrás de un proxy o balanceador de la plataforma, la dirección del socket es la del proxy, y el cliente puede escribir lo que quiera en `X-Forwarded-For`. Por eso la IP se calcula así:
+
+- `TRUST_PROXY_HOPS=0` (por defecto): solo cuenta la IP del socket y se ignora `X-Forwarded-For`. Es lo correcto en local, pero **detrás de una plataforma todos los visitantes compartirían la IP del proxy y el límite se aplicaría en conjunto**.
+- `TRUST_PROXY_HOPS=N`: se toma la entrada N de `X-Forwarded-For` contando desde el final, que es la que añade el último proxy de confianza; lo que el cliente escriba antes se ignora.
+
+Configura `N` con el número de proxies que hay entre Internet y la aplicación (según la documentación de la plataforma; un único balanceador suele ser `1`, pero **compruébalo**, porque depende de cada plataforma). Un `N` demasiado grande no abre un bypass (se vuelve a la IP del socket); uno demasiado pequeño hace que se tome una IP que no es la del cliente.
+
+Cómo comprobarlo tras desplegar (sustituye la URL; en PowerShell usa `curl.exe`):
+
+1. **El encabezado falso no evade el límite:** envía más peticiones por minuto que `RATE_LIMIT_POR_MINUTO`, cambiando `-H "X-Forwarded-For: 10.0.0.N"` en cada una. Debes ver `429` al superar el límite.
+2. **El límite es por cliente y no global:** con el límite agotado desde un equipo, otra conexión distinta (p. ej. el celular con datos móviles) debe poder usar el chat. Si también recibe `429`, `N` es demasiado pequeño.
+
+## Salidas generadas
+
+Con `demo.ts` y las pruebas se escriben en `out/`; con el servidor, en `out/sesiones/<sessionId>/` (misma estructura):
+
+
+- `control.csv` — una fila por cada llamada a `oc_crear` (exitosa, bloqueada, pendiente de confirmación o idempotente), aunque se repita, más una fila por validación (`oc_validar` omite la fila si es idéntica a la anterior de esa solicitud): `solicitud_id, resultado, numero_oc, retroactiva, bloqueos, confirmaciones, ts`. Para Contabilidad / Auditoría.
 - `log.jsonl` — toda llamada a herramienta (`ts, sessionId, herramienta, args, ok, resumen`).
 - `sap/ordenes.jsonl` — órdenes del SAP simulado (numeración desde `4500000001`).
 - `<caso>/payload.json`, `<caso>/trazabilidad.json` — la OC y de dónde sale cada valor.

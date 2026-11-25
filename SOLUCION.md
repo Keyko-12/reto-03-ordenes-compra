@@ -34,8 +34,9 @@ Una regla de negocio nueva se agrega en `src/tools/controles.ts` y `src/knowledg
 `ejecutarTurno` (`src/agent.ts`) implementa: mensaje del usuario → (modelo → herramientas)\* → respuesta.
 
 - **Tope de iteraciones (CA1).** `MAX_ITERACIONES` (25 por defecto). Al alcanzarlo se hace una última llamada pidiendo un resumen de lo logrado y lo pendiente; si esa llamada falla, se responde con un mensaje fijo. No hay bucle infinito posible.
-- **Tope de tokens.** Por sesión (`MAX_TOKENS_SESION`) y por día para todo el servidor (`MAX_TOKENS_DIA`), más límite de peticiones por IP. Un visitante no puede gastar la clave sin límite.
-- **Confirmación humana (CA3), forzada en código y no solo en el prompt.** Cuando un turno termina con excepciones pendientes (`oc_validar` con confirmaciones, o `oc_crear` que respondió `requiere_confirmacion`), el ciclo anota el caso y el número de turno, y responde `needsConfirmation: true` (el front resalta el estado). `oc_crear` con `confirmado: true` solo procede si esa petición se hizo **en el turno inmediatamente anterior**. Un modelo que intente auto-confirmarse en el mismo turno, o confirmar tarde después de que el usuario cambió de tema, recibe un error y no se crea nada (hay pruebas para ambos casos).
+- **Tope de tokens.** Por sesión (`MAX_TOKENS_SESION`) y por día para todo el servidor (`MAX_TOKENS_DIA`), más límite de peticiones por IP. Un visitante no puede gastar la clave sin límite. La IP no se toma de `X-Forwarded-For` tal cual (el cliente puede falsificarlo): por defecto se usa la del socket, y detrás de una plataforma `TRUST_PROXY_HOPS=N` toma la entrada N desde el final del encabezado, la que añade el último proxy de confianza (README, «Despliegue»).
+- **Salidas aisladas por sesión.** Cada sesión escribe en `out/sesiones/<id>/`: su propio SAP simulado (numeración desde `4500000001`), `control.csv` y `log.jsonl`. Dos evaluadores que prueben `sol-001` a la vez obtienen cada uno una creación real, no una respuesta idempotente por culpa del otro.
+- **Confirmación humana (CA3), forzada en código y no solo en el prompt.** Cuando un turno termina con excepciones pendientes (`oc_validar` con confirmaciones, o `oc_crear` que respondió `requiere_confirmacion`), el ciclo anota el caso y el número de turno, y responde `needsConfirmation: true` (el front resalta el estado). `oc_crear` con `confirmado: true` solo procede si se cumplen **dos** condiciones: (a) la petición se hizo **en el turno inmediatamente anterior** y (b) el mensaje del usuario en este turno es una **confirmación afirmativa explícita**, que decide `clasificarConfirmacion` (`src/confirmacion.ts`) sin intervención del modelo. Esa función clasifica en afirmativa («confirmo», «sí, créala», «adelante»), negativa («no la crees todavía», «cancela») o ambigua (preguntas, reservas como «confirmo, pero…», condicionales como «si el valor cambia…», mensajes que mezclan sí y no, mensajes largos); **solo la afirmativa confirma**, y ante la duda no confirma. Un modelo que intente auto-confirmarse en el mismo turno, que confirme tarde después de que el usuario cambió de tema, o que confirme pese a un «no» o a una respuesta ambigua, recibe un error y no se crea nada (hay pruebas para cada caso, y el botón «Confirmo» del front se comprueba contra el clasificador). Límite: es una lista de reglas en español, no comprensión del lenguaje; está sesgada a rechazar, así que una confirmación inusual simplemente se vuelve a pedir.
 - **Errores (CA5).** Un fallo o timeout del proveedor se traduce a un mensaje en español dentro del chat (sin detalles internos ni claves); la sesión sigue viva y el turno siguiente funciona. Argumentos inválidos o herramientas inexistentes se devuelven al modelo como `{ ok:false, error }` para que corrija.
 - **Trazabilidad (CA4).** Cada llamada queda visible en el chat (nombre, argumentos, resumen y resultado desplegable) y en `out/log.jsonl`.
 
@@ -54,7 +55,9 @@ Una regla de negocio nueva se agrega en `src/tools/controles.ts` y `src/knowledg
   | Caso bloqueado (`sol-003`) | 3 | ~8.000 | ~400–600 |
   | Con confirmación (`sol-004`, 2 turnos) | 6 | ~18.000 | ~800–1.100 |
 
-  Con un precio de referencia de **USD 1 por millón de tokens de entrada y USD 5 por millón de salida** (lista de Claude Haiku 4.5 vista en la documentación de precios; **verifica el precio vigente del modelo que uses**), un caso cuesta del orden de **USD 0,01–0,03**. Unos 13.000 de los ~18.000 tokens de entrada son el prompt y las herramientas reenviados en cada llamada, así que el *prompt caching* del prefijo es la primera optimización si el volumen crece. Con 8–12 solicitudes al mes (volumen del PRD), el costo mensual es de centavos de dólar. El costo operativo real está en el tiempo de revisión humana, no en el modelo.
+  **Precio.** La página de precios de Anthropic (consultada el 25-nov-2026) lista Claude Haiku 5.5 a **USD 0,10 por millón de tokens de entrada y USD 0,50 por millón de salida** para prompts de hasta 100.000 tokens (por encima, USD 0,50 y USD 2,50). Cada llamada de este agente envía ~8.000–30.000 tokens, muy por debajo de ese umbral. Con esos precios un caso cuesta del orden de **USD 0,001–0,003** (caso limpio ≈ 0,0022; bloqueado ≈ 0,0010; con confirmación ≈ 0,0023). Con 8–12 solicitudes al mes (volumen del PRD) el costo mensual es de centavos. El tope diario `MAX_TOKENS_DIA` (1,5 millones de tokens) limita el gasto del servicio a **menos de USD 0,75 al día** aun si todos fueran tokens de salida. **Los precios cambian: reverifica la página el día del despliegue.** Unos 13.000 de los ~18.000 tokens de entrada son el prompt y las herramientas reenviados en cada llamada, así que el *prompt caching* del prefijo es la primera optimización si el volumen crece. El costo operativo real está en el tiempo de revisión humana, no en el modelo.
+
+**Qué no está verificado:** la página de precios no cita el identificador de API del modelo. El valor por defecto (`claude-haiku-5-5`, en el código, `.env.example` y esta sección) es el que Anthropic publica para Haiku 5.5, pero ningún paso de la construcción lo exigió contra la API; se comprobará con la primera llamada real, antes de la defensa.
 
 ## 5. Matriz de controles
 
@@ -134,8 +137,10 @@ La decisión de política (tolerar con marca o rechazar) es de la dirección; el
 3. **Parseo de la cotización con expresiones regulares.** *Alternativa descartada:* extraer los campos con el modelo. *Por qué:* los valores que van a SAP deben ser deterministas y reproducibles en `demo.ts` sin modelo. *Riesgo:* los PDF reales de proveedores varían mucho; en producción se necesitaría extracción con modelo **más** validación contra la herramienta (ver §12).
 4. **El payload transmite el precio de la solicitud (IVA incluido).** *Alternativa descartada:* convertir a precio neto con la base gravable de la cotización. *Por qué:* mantiene cada valor trazable a `solicitud` y evita inventar una conversión sin confirmar la convención de SAP. *Costo:* hay que corregirlo en el adaptador real (§6).
 5. **Sesiones y SAP simulado en memoria y archivos.** *Alternativa descartada:* base de datos. *Por qué:* el PRD lo declara no-objetivo. *Costo:* se pierden al reiniciar el contenedor.
-6. **`control.csv` registra también las validaciones (bloqueadas y pendientes), no solo las creaciones.** *Por qué:* auditoría quiere ver los intentos que fallaron, y los casos bloqueados nunca llegan a crear. Las filas idénticas consecutivas se omiten para no inflar el log por validar dos veces.
+6. **`control.csv` registra cada intento de `oc_crear` y también las validaciones.** *Por qué:* auditoría quiere ver los intentos que fallaron, y los casos bloqueados nunca llegan a crear; HU-5 pide una fila por intento. Cada llamada a `oc_crear` agrega su fila aunque repita la anterior; solo `oc_validar`, que es una consulta sin efectos, omite la fila si es idéntica a la última de esa solicitud, para no inflar el log por validar dos veces. *Costo:* un caso bloqueado procesado por el agente deja dos filas (la validación y el intento de creación).
 7. **Dos adaptadores LLM reales y un mock.** *Por qué:* la prueba pide poder cambiar de proveedor sin tocar el ciclo; el mock permite probar el ciclo, la guardia de confirmación y el front sin gastar tokens.
+8. **Salidas aisladas por sesión en vez de un SAP simulado compartido.** *Alternativa descartada:* un único `out/` para todos, con un endpoint de reinicio. *Por qué:* con un link público y varios evaluadores simultáneos, un estado compartido haría que el segundo vea `sol-001` ya creada y no pueda reproducir los casos del PRD; un reinicio global borraría el trabajo de otro visitante. *Costo:* una carpeta por sesión (se limpia al expulsar la sesión más antigua y al arrancar).
+9. **La confirmación se valida por contenido con reglas, no con el modelo.** *Alternativa descartada:* pedirle a otra llamada al modelo que clasifique la respuesta. *Por qué:* esa decisión protege una escritura en SAP; debe ser determinista, probable sin clave y no depender de otro modelo. *Costo:* reglas en español que rechazan de más (se vuelve a pedir la confirmación) y no entienden formulaciones inusuales.
 
 ## 9. Supuestos
 
@@ -148,7 +153,7 @@ La decisión de política (tolerar con marca o rechazar) es de la dirección; el
 - La fecha de la OC es la del servidor al crearla; `OC_NOW` la fija en pruebas.
 - Solo se soportan `COP` y `USD` (los que define el esquema del payload); otra moneda es un error legible.
 - El NIT se compara sin puntos ni dígito de verificación.
-- La demo pública comparte un único SAP simulado entre todas las sesiones: crear dos veces la misma solicitud devuelve la misma OC, por la idempotencia.
+- Cada sesión del chat tiene su propio SAP simulado (`out/sesiones/<id>/`): la idempotencia vale dentro de una sesión, no entre sesiones. «Nueva sesión» en el front empieza de cero. Todo se pierde al reiniciar el servidor.
 - Los fixtures representan la variabilidad real; en producción habrá cotizaciones y aprobaciones peores.
 
 ## 10. Cobertura
@@ -166,11 +171,21 @@ La decisión de política (tolerar con marca o rechazar) es de la dirección; el
 
 ## 11. Uso de IA
 
-- **Qué usé:** Claude (Anthropic) como asistente de construcción: lectura del PRD y de los fixtures, diseño de la arquitectura, implementación del código (herramientas, controles, ciclo del agente, servidor, front), pruebas, documentación y esta redacción.
-- **Verificación:** el código se verifica con 35 pruebas automáticas (`bun test`), `tsc --noEmit` y `demo.ts` (que falla con código 1 si algún resultado no coincide con lo esperado). El front se probó en un navegador headless con el modelo guionado.
-- **Lo que no se verificó:** las llamadas a un proveedor de modelo real (Anthropic u otro) **no se ejecutaron** durante la construcción; solo se probó el ciclo con el modelo guionado. Los adaptadores Anthropic y OpenAI-compatible están escritos contra la documentación pública de cada API y deben probarse con una clave real antes de la defensa.
+Estado a la fecha de esta revisión (25-nov-2026). Si algo de lo que aquí se declara como pendiente cambia antes de entregar, esta sección debe actualizarse.
+
+- **Qué usé:**
+  - **Claude (Anthropic)**, como asistente principal de construcción: análisis del PRD y de los fixtures, propuesta de la arquitectura, implementación del código (herramientas, controles, ciclo del agente, servidor, front), desarrollo de las pruebas y elaboración de la documentación, incluida esta redacción.
+  - **ChatGPT**, como apoyo independiente para revisar decisiones técnicas, identificar riesgos y evaluar las correcciones.
+- **Qué se verificó y quién lo hizo:**
+  - **Yo** ejecuté en mi equipo `bun test` (81 pruebas aprobadas, 0 fallidas), `bun run typecheck` (sin errores) y `bun run demo.ts` (los seis escenarios dieron el resultado esperado; la demo termina con código 1 si alguno no coincide).
+  - **Claude** probó la interfaz en un navegador headless con el modelo guionado (`mock`).
+- **Lo que no se verificó:**
+  - **No se hicieron llamadas reales a Anthropic ni a otro proveedor de modelo.** El ciclo del agente solo se probó con el modelo guionado; los adaptadores Anthropic y OpenAI-compatible están escritos contra la documentación pública de cada API y deben probarse con una clave real antes de la defensa.
+  - **No hay integración efectiva con SAP:** solo el SAP simulado sobre archivos; el adaptador real es el diseño de §6.
+  - **No se ha construido la imagen Docker** (no tengo Docker instalado en mi equipo), por lo que el `Dockerfile` no está probado.
+  - **No existe todavía un despliegue público.**
 - **Alternativas de diseño descartadas** (con su razón): ver §8, decisiones 1 a 3 (el modelo como fuente de valores, la confirmación solo por prompt y la extracción de la cotización por modelo).
-- **Revisión humana (completar antes de entregar):** `PENDIENTE: indicar qué partes revisaste, qué cambiaste y qué descartaste de lo propuesto`. El PRD exige poder explicar cada línea entregada.
+- **Responsabilidad:** las decisiones finales y la aceptación de las limitaciones documentadas en este documento (§8, §10 y §12) corresponden al autor del proyecto.
 
 ## 12. Riesgos para producción y mitigación
 
